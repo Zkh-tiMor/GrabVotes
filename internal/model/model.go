@@ -12,8 +12,13 @@ func (d OrderModel) TableName() string {
 	return "order"
 }
 
-type MqModel struct {
+type MqTicket struct {
 	TicketID string `json:"ticket_id"`
 	Style    int8   `json:"style"`  //需要做的的操作，1表示加1，-1表示减1
 	Amount   int    `json:"amount"` // 票数操作的数字
+}
+
+type GrabVoteReq struct {
+	UserID   string `json:"user_id"`
+	TicketID string `json:"ticket_id"`
 }

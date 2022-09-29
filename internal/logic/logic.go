@@ -47,31 +47,34 @@ func GrabAction(userID string, ticketID string) (bool, error) {
 		return false, nil
 	}
 	//  到这就是抢票成功了，还要操作数据库票数减1，用消息队列异步更新数据库，否则导致锁争用
-	data := model.OrderModel{
+	order := model.OrderModel{
 		OrderID:  snowid.GenID(),
 		TicketID: ticketID,
 		UserID:   userID,
 	}
-	mqModel := model.MqModel{
+	mqTicket := model.MqTicket{
 		TicketID: utils.ToString(ticketID),
 		Style:    decr,
 		Amount:   1,
 	}
-	byteModel, err := json.Marshal(mqModel)
+	mqTicketByte, err := json.Marshal(mqTicket)
 	if err != nil {
 		return false, err
 	}
-
+	orderByte, err := json.Marshal(order)
+	if err != nil {
+		return false, err
+	}
 	//  MySQL插入订单
-	if err = mysql.InsertOrder(data); err != nil {
+	//  TODO:对这里来说，Redis并没有为MySQL挡住流量
+	if err = GetPublisher().JsonByte(orderByte, InsertMysqlOrder); err != nil {
 		return false, err
 	}
 	//  异步消息队列
-	mq, _ := NewRabbitMQSimple(MqName)
-	if err = mq.PublishSimple(byteModel); err != nil {
+	if err = GetPublisher().JsonByte(mqTicketByte, UpdateTicketNum); err != nil {
 		return false, err
 	}
-	mq.CloseMq()
+
 	//  插入成功，开启定时任务：若20分钟后未支付则取消订单
 	go func(orderID string) { //消除闭包影响
 		timer := time.NewTimer(payTime)
@@ -79,7 +82,7 @@ func GrabAction(userID string, ticketID string) (bool, error) {
 		if err := mysql.DeleteOrder(orderID); err != nil {
 			log.Println("取消订单失败：", err.Error(), "time:", beginTime)
 		}
-	}(data.OrderID)
+	}(order.OrderID)
 	return true, nil
 }
 

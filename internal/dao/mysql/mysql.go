@@ -88,7 +88,7 @@ func IncrTicketNum(ticketID string, num int) error {
 }
 
 func DecrTicketNum(ticketID string, num int) error {
-	if err := db.Exec("update `ticket_msg` set `ticket_num` = `ticket_num` - ? where `ticket_id` = ?", num, ticketID).Error; err != nil {
+	if err := db.Exec("update `ticket_msg` set `ticket_num` = `ticket_num` - ? where `ticket_id` = ? limit 1", num, ticketID).Error; err != nil {
 		return err
 	}
 	return nil
