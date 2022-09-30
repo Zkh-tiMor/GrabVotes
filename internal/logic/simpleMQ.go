@@ -21,6 +21,7 @@ var mqUrl string = fmt.Sprintf("amqp://%s:%s@127.0.0.1:5672/%s", mqUsername, mqP
 
 const UpdateTicketNum = "updateTicketNum"
 const InsertMysqlOrder = "insertMysqlOrder"
+const CancelOrder = "cancelOrder"
 
 var rabbitMqQueue *amqp.Channel
 
@@ -148,5 +149,34 @@ func (c *consumer) UpdateTicketNum(queueName string) {
 		}
 
 	}
+}
 
+func (c *consumer) CancelOrder(queueName string) {
+	msgs, err := rabbitMqQueue.Consume(
+		queueName,
+		"",    // consumer, 用来区分多个消费者
+		true,  // auto-ack,是否自动应答
+		false, // exclusive,是否独有
+		false, // no-local，true表示不能将同一个Connection中生产者发送的消息传递给这个Connection中的消费者
+		false, // no-wait, 列是否阻塞
+		nil,   // args
+	)
+	if err != nil {
+		panic("RabbitMQ接收消息失败：" + err.Error())
+	}
+	fmt.Println("异步取消订单队列已就绪")
+
+	for d := range msgs { // 如果没有消息会一直阻塞，直到channel关闭
+		var cancel model.CancelOrderMq
+		err := json.Unmarshal(d.Body, &cancel)
+		if err != nil {
+			log.Println("反序列化失败：", err.Error())
+			continue
+		}
+		err = mysql.DeleteOrder(cancel.OrderID)
+		if err != nil {
+			log.Println("取消订单失败：", err.Error())
+			continue
+		}
+	}
 }

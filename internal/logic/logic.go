@@ -1,7 +1,6 @@
 package logic
 
 import (
-	"GrabVotes/internal/dao/mysql"
 	"GrabVotes/internal/dao/redis"
 	"GrabVotes/internal/model"
 	"GrabVotes/internal/pkg/snowid"
@@ -23,7 +22,7 @@ import (
 //  3.用户支付订单后写入数据库
 
 const (
-	payTime      = time.Minute * 20
+	payTime      = time.Minute * 3
 	incr    int8 = 1
 	decr    int8 = -1
 )
@@ -57,6 +56,10 @@ func GrabAction(userID string, ticketID string) (bool, error) {
 		Style:    decr,
 		Amount:   1,
 	}
+	cancelOrderMq := model.CancelOrderMq{
+		OrderID: order.OrderID,
+	}
+	//  序列化存入消息队列
 	mqTicketByte, err := json.Marshal(mqTicket)
 	if err != nil {
 		return false, err
@@ -65,24 +68,27 @@ func GrabAction(userID string, ticketID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	//  MySQL插入订单
-	//  TODO:对这里来说，Redis并没有为MySQL挡住流量
+	cancelOrderByte, err := json.Marshal(cancelOrderMq)
+	if err != nil {
+		return false, err
+	}
+	//  异步MySQL插入订单
 	if err = GetPublisher().JsonByte(orderByte, InsertMysqlOrder); err != nil {
 		return false, err
 	}
-	//  异步消息队列
+	//  异步更新票数
 	if err = GetPublisher().JsonByte(mqTicketByte, UpdateTicketNum); err != nil {
 		return false, err
 	}
 
 	//  插入成功，开启定时任务：若20分钟后未支付则取消订单
-	go func(orderID string) { //消除闭包影响
+	go func(cancelOrderModel []byte) { //消除闭包影响
 		timer := time.NewTimer(payTime)
-		beginTime := <-timer.C //阻塞20分钟后，修改订单
-		if err := mysql.DeleteOrder(orderID); err != nil {
-			log.Println("取消订单失败：", err.Error(), "time:", beginTime)
+		_ = <-timer.C //阻塞20分钟后，修改订单
+		if err = GetPublisher().JsonByte(cancelOrderModel, CancelOrder); err != nil {
+			log.Println("插入消息队列失败：", err)
 		}
-	}(order.OrderID)
+	}(cancelOrderByte)
 	return true, nil
 }
 

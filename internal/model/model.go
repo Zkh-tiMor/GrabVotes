@@ -22,3 +22,7 @@ type GrabVoteReq struct {
 	UserID   string `json:"user_id"`
 	TicketID string `json:"ticket_id"`
 }
+
+type CancelOrderMq struct {
+	OrderID string `json:"order_id"`
+}

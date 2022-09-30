@@ -7,6 +7,8 @@ import (
 	"GrabVotes/internal/logic"
 	"GrabVotes/internal/pkg/snowid"
 	"github.com/gin-gonic/gin"
+	"net/http"
+	"time"
 )
 
 func init() {
@@ -23,12 +25,12 @@ func init() {
 	}
 
 	// 初始化Redis缓存中的票数
-	if err := logic.SetRedisTicketNum("zkh_mirror", 2000); err != nil {
+	if err := logic.SetRedisTicketNum("zkh_mirror", 5000); err != nil {
 		panic("初始化Redis缓存失败：" + err.Error())
 	}
 
 	// 初始化消息队列
-	if err := logic.InitMqQueue([]string{logic.UpdateTicketNum, logic.InsertMysqlOrder}); err != nil {
+	if err := logic.InitMqQueue([]string{logic.UpdateTicketNum, logic.InsertMysqlOrder, logic.CancelOrder}); err != nil {
 		panic("初始化消息队列失败：" + err.Error())
 	}
 }
@@ -37,7 +39,7 @@ func main() {
 	r := gin.Default()
 
 	gin.SetMode(gin.DebugMode)
-	// 抢购订单，感觉需要加消息队列削峰了
+	// 抢购订单
 	r.POST("/GrabAction", controller.JWTAuth, controller.GrabAction)
 	// 支付订单
 	r.POST("/defrayAction", controller.JWTAuth, controller.DefrayAction)
@@ -49,7 +51,19 @@ func main() {
 	go func() {
 		logic.GetConsumer().InsertMysqlOrder(logic.InsertMysqlOrder)
 	}()
-	err := r.Run(":8080")
+
+	go func() {
+		logic.GetConsumer().CancelOrder(logic.CancelOrder)
+	}()
+
+	server := http.Server{
+		Addr:           ":8080",
+		Handler:        r,
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+	err := server.ListenAndServe()
 	if err != nil {
 		panic("启动异常：" + err.Error())
 	}
