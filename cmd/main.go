@@ -29,32 +29,20 @@ func init() {
 		panic("初始化Redis缓存失败：" + err.Error())
 	}
 
-	// 初始化消息队列
-	if err := logic.InitMqQueue([]string{logic.UpdateTicketNum, logic.InsertMysqlOrder, logic.CancelOrder}); err != nil {
-		panic("初始化消息队列失败：" + err.Error())
+	if err := logic.InitKafKa(); err != nil {
+		panic("初始化Kafka错误：" + err.Error())
 	}
 }
 
 func main() {
 	r := gin.Default()
 
-	gin.SetMode(gin.DebugMode)
+	defer logic.ProducerClose()
+	gin.SetMode(gin.ReleaseMode)
 	// 抢购订单
 	r.POST("/GrabAction", controller.JWTAuth, controller.GrabAction)
 	// 支付订单
 	r.POST("/defrayAction", controller.JWTAuth, controller.DefrayAction)
-
-	go func() {
-		logic.GetConsumer().UpdateTicketNum(logic.UpdateTicketNum)
-	}()
-
-	go func() {
-		logic.GetConsumer().InsertMysqlOrder(logic.InsertMysqlOrder)
-	}()
-
-	go func() {
-		logic.GetConsumer().CancelOrder(logic.CancelOrder)
-	}()
 
 	server := http.Server{
 		Addr:           ":8080",

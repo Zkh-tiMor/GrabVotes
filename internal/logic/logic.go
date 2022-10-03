@@ -5,31 +5,20 @@ import (
 	"GrabVotes/internal/model"
 	"GrabVotes/internal/pkg/snowid"
 	"encoding/json"
+	"github.com/Shopify/sarama"
 	"gorm.io/gorm/utils"
-	"log"
 	"time"
 )
 
-//  Redis存的数据MySQL一定也要有
-
-//  1. 用户发起抢购
-//  2.抢购失败直接返回失败，抢票成功则生成订单（20分钟内未支付则取消订单，票数加1）
-//  订单写入数据库并开启延时任务，20分钟后如果status字段为0（未支付）则软删除，deleted位 --> 置1
-
-//  只有支付成功了，ticket_msg中票的数量才会减1
-
-//  策略：先更新MySQL，再更新缓存（会有一点不一致，以MySQL为准）
-//  3.用户支付订单后写入数据库
-
 const (
-	payTime      = time.Minute * 3
+	payTime      = time.Minute * 20
 	incr    int8 = 1
 	decr    int8 = -1
 )
 
 // GrabAction 抢票成功返回true,nil
 func GrabAction(userID string, ticketID string) (bool, error) {
-	// 先校验ticketID的正确性
+	// 校验ticketID的正确性
 	ticketExist, err := redis.Dealer().ExistKey(ticketID)
 	if err != nil {
 		return false, err
@@ -45,7 +34,7 @@ func GrabAction(userID string, ticketID string) (bool, error) {
 	if remain < 0 { //票已经卖完了
 		return false, nil
 	}
-	//  到这就是抢票成功了，还要操作数据库票数减1，用消息队列异步更新数据库，否则导致锁争用
+	//  到这就是抢票成功了，还要操作数据库票数减1，用消息队列异步更新数据库
 	order := model.OrderModel{
 		OrderID:  snowid.GenID(),
 		TicketID: ticketID,
@@ -59,7 +48,7 @@ func GrabAction(userID string, ticketID string) (bool, error) {
 	cancelOrderMq := model.CancelOrderMq{
 		OrderID: order.OrderID,
 	}
-	//  序列化存入消息队列
+	//  序列化
 	mqTicketByte, err := json.Marshal(mqTicket)
 	if err != nil {
 		return false, err
@@ -73,21 +62,15 @@ func GrabAction(userID string, ticketID string) (bool, error) {
 		return false, err
 	}
 	//  异步MySQL插入订单
-	if err = GetPublisher().JsonByte(orderByte, InsertMysqlOrder); err != nil {
-		return false, err
-	}
+	SendMQ(insertOderTopic, sarama.ByteEncoder(orderByte))
 	//  异步更新票数
-	if err = GetPublisher().JsonByte(mqTicketByte, UpdateTicketNum); err != nil {
-		return false, err
-	}
+	SendMQ(updateTicketNumTopic, sarama.ByteEncoder(mqTicketByte))
 
-	//  插入成功，开启定时任务：若20分钟后未支付则取消订单
+	//  开启定时任务：若20分钟后未支付则取消订单
 	go func(cancelOrderModel []byte) { //消除闭包影响
 		timer := time.NewTimer(payTime)
 		_ = <-timer.C //阻塞20分钟后，修改订单
-		if err = GetPublisher().JsonByte(cancelOrderModel, CancelOrder); err != nil {
-			log.Println("插入消息队列失败：", err)
-		}
+		SendMQ(cancelOrderTopic, sarama.ByteEncoder(cancelOrderModel))
 	}(cancelOrderByte)
 	return true, nil
 }

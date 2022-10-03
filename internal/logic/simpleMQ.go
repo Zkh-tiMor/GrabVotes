@@ -19,36 +19,47 @@ const (
 // TODO: 瓶颈看起来像在amqp的连接上， 把每次队列操作的QueueDeclare操作独立出来
 var mqUrl string = fmt.Sprintf("amqp://%s:%s@127.0.0.1:5672/%s", mqUsername, mqPassword, mqVirtualHost)
 
-const UpdateTicketNum = "updateTicketNum"
+const UpdateTicketNum = "updateTicketNumTopic"
 const InsertMysqlOrder = "insertMysqlOrder"
 const CancelOrder = "cancelOrder"
 
-var rabbitMqQueue *amqp.Channel
+var channelMap map[string]*amqp.Channel
 
-func InitMqQueue(queueNames []string) error {
+func InitMqQueue() error {
+	channelMap = make(map[string]*amqp.Channel)
+
 	conn, err := amqp.Dial(mqUrl)
 	if err != nil {
 		return err
 	}
-	rabbitMqQueue, err = conn.Channel() //初始化channel
+	if err = initMqQueue(conn, InsertMysqlOrder); err != nil {
+		return err
+	}
+	if err = initMqQueue(conn, UpdateTicketNum); err != nil {
+		return err
+	}
+	if err = initMqQueue(conn, CancelOrder); err != nil {
+		return err
+	}
+	return nil
+}
+
+func initMqQueue(conn *amqp.Connection, queueName string) (err error) {
+	channelMap[queueName], err = conn.Channel()
 	if err != nil {
 		return err
 	}
-
-	for _, queueName := range queueNames {
-		_, err = rabbitMqQueue.QueueDeclare( //声明队列
-			queueName,
-			true,  //是否持久化
-			false, //是否自动删除
-			false, //是否具有排他性
-			false, //是否阻塞处理
-			nil,   //额外的属性
-		)
-		if err != nil {
-			return err
-		}
+	_, err = channelMap[queueName].QueueDeclare(
+		queueName,
+		true,  //是否持久化
+		false, //是否自动删除
+		false, //是否具有排他性
+		false, //是否阻塞处理
+		nil,   //额外的属性
+	)
+	if err != nil {
+		return err
 	}
-
 	return nil
 }
 
@@ -60,7 +71,7 @@ func GetPublisher() *publisher {
 
 func (p *publisher) JsonByte(ModelJson []byte, queueName string) error {
 	//调用channel 发送消息到队列中
-	err := rabbitMqQueue.Publish(
+	err := channelMap[queueName].Publish(
 		"",
 		queueName,
 		false, //如果为true，根据自身exchange类型和routekey规则无法找到符合条件的队列会把消息返还给发送者
@@ -82,9 +93,9 @@ func GetConsumer() *consumer {
 	return &consumer{}
 }
 
-func (c *consumer) InsertMysqlOrder(queueName string) {
-	msgs, err := rabbitMqQueue.Consume(
-		queueName,
+func (c *consumer) InsertMysqlOrder() {
+	msgs, err := channelMap[InsertMysqlOrder].Consume(
+		InsertMysqlOrder,
 		"",    // consumer, 用来区分多个消费者
 		true,  // auto-ack,是否自动应答
 		false, // exclusive,是否独有
@@ -111,10 +122,10 @@ func (c *consumer) InsertMysqlOrder(queueName string) {
 	}
 }
 
-func (c *consumer) UpdateTicketNum(queueName string) {
+func (c *consumer) UpdateTicketNum() {
 	//接收消息
-	msgs, err := rabbitMqQueue.Consume(
-		queueName,
+	msgs, err := channelMap[UpdateTicketNum].Consume(
+		UpdateTicketNum,
 		"",    // consumer, 用来区分多个消费者
 		true,  // auto-ack,是否自动应答
 		false, // exclusive,是否独有
@@ -151,9 +162,9 @@ func (c *consumer) UpdateTicketNum(queueName string) {
 	}
 }
 
-func (c *consumer) CancelOrder(queueName string) {
-	msgs, err := rabbitMqQueue.Consume(
-		queueName,
+func (c *consumer) CancelOrder() {
+	msgs, err := channelMap[CancelOrder].Consume(
+		CancelOrder,
 		"",    // consumer, 用来区分多个消费者
 		true,  // auto-ack,是否自动应答
 		false, // exclusive,是否独有

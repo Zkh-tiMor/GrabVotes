@@ -51,7 +51,7 @@ func InsertOrder(model model.OrderModel) error {
 
 // DeleteOrder 取消订单
 func DeleteOrder(orderID string) error {
-	//  先以update形式查询订单status，如果status为1，就直接返回，status为0，就修改
+	//  先以update形式查询订单status，如果status为1，就直接返回; status为0，就修改
 	return db.Transaction(func(tx *gorm.DB) error {
 		//  锁获取了之后只有在事务结束才释放，select添加写锁防止事务冲突
 		//  查询判断订单状态
