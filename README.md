@@ -2,6 +2,10 @@
 
 
 
+> 详细介绍请移步：https://bytedancecampus1.feishu.cn/docx/doxcnuQwm7jF76P8o5gU9a0LY1g
+
+
+
 ### V0
 - 确立选型，搭建基本框架
 
@@ -26,13 +30,13 @@
 - 可支持一分钟内同时抢票人数：16万
 
 
-因为模拟抢票的客户端代码十分简短，我放在了 /client 目录下
+
 
 ### 目录结构：
 ```text
 >GrabVotes:                                        
 ├─client
-│      client.go        // 模拟客户端
+│      client.go        // 模拟抢票客户端
 │
 ├─cmd
 │      main.go      //程序入口
